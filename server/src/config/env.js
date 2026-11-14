@@ -1,11 +1,4 @@
-import dotenv from "dotenv";
-import { fileURLToPath } from "node:url";
-
-// Resolve from this module so startup works from either workspace directory.
-dotenv.config({
-  path: fileURLToPath(new URL("../../.env", import.meta.url)),
-  quiet: true,
-});
+import './loadEnv.js';
 
 export function readConfig(env) {
   const mongodbUri = env.MONGODB_URI?.trim();

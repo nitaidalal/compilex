@@ -1,12 +1,12 @@
 // Commands are argv arrays for Docker exec, never interpolated shell strings.
-// Source is read-only under /workspace; only /tmp holds compiler output.
+// Source paths are relative to the sandbox working directory (/tmp).
 export const languages = Object.freeze({
   cpp: {
     id: 'cpp',
     displayName: 'C++',
     image: 'compilex-sandbox-cpp:1',
     sourceFile: 'main.cpp',
-    compileCommand: ['g++', '/workspace/main.cpp', '-std=c++17', '-O2', '-o', '/tmp/main'],
+    compileCommand: ['g++', 'main.cpp', '-std=c++17', '-O2', '-o', '/tmp/main'],
     runCommand: ['/tmp/main'],
     starterCode: `#include <iostream>
 #include <string>
@@ -27,7 +27,7 @@ int main() {
     image: 'compilex-sandbox-python:1',
     sourceFile: 'main.py',
     compileCommand: null,
-    runCommand: ['python', '-B', '-u', '/workspace/main.py'],
+    runCommand: ['python', '-B', '-u', 'main.py'],
     starterCode: `import sys
 
 name = sys.stdin.readline().rstrip("\\r\\n")
@@ -41,7 +41,7 @@ print(f"Hello, {name or 'world'}!")
     image: 'compilex-sandbox-javascript:1',
     sourceFile: 'main.mjs',
     compileCommand: null,
-    runCommand: ['node', '/workspace/main.mjs'],
+    runCommand: ['node', 'main.mjs'],
     starterCode: `import { createInterface } from 'node:readline';
 
 const input = createInterface({ input: process.stdin });

@@ -97,5 +97,23 @@ Each should print `Hello, Ada!`. These are manual examples; the output-limiting 
 ### Add a language
 
 1. Add `server/sandbox/Dockerfile.<id>` based on an official runtime/toolchain image. Create UID/GID 10001 and `/workspace`, select that non-root user, and avoid extra packages.
-2. Add a matching entry in `server/src/config/languages.js`: `id`, `displayName`, `image`, `sourceFile`, `compileCommand` (an argv array or `null`), `runCommand` (argv array), `starterCode`, and `monacoLanguage`. Use fixed container paths under `/workspace` for source and `/tmp` for compiler output. The starter should greet the user and read one line from stdin.
+2. Add a matching entry in `server/src/config/languages.js`: `id`, `displayName`, `image`, `sourceFile`, `compileCommand` (an argv array or `null`), `runCommand` (argv array), `starterCode`, and `monacoLanguage`. Use relative source filenames: the service runs in `/tmp`, where source and compile output fit inside one bounded tmpfs. The starter should greet the user and read one line from stdin.
 3. Run `npm.cmd run build:images` and manually run the new starter with the same restrictions. The build script discovers `Dockerfile.<id>` from config; no script changes are needed. Preserve every sandbox security restriction when wiring it into the future execution service.
+
+## Sandbox service
+
+`runCode({ language, code, stdin })` in `server/src/services/sandbox.service.js` executes one request in one throwaway container. Language IDs are `cpp`, `python`, and `javascript`. Start Docker Desktop and build the images, then run the demo from the root or `server/`:
+
+```powershell
+npm.cmd run sandbox:demo
+```
+
+The demo prints three successful greetings with `Ada` as input, a C++ `compile_error`, and a Python infinite loop returning `timeout`. It needs neither a MongoDB connection nor a configured MongoDB URI.
+
+The service packs source and stdin into an in-memory tar archive, base64-encodes it, and sends it as small data arguments to a fixed Docker exec extraction command. A non-root process decodes and extracts into the bounded `/tmp` tmpfs. This avoids Windows bind-mount paths and named-pipe half-close behavior. No host temp files or host code execution are involved. Docker's archive-copy endpoint cannot write to a read-only root, so the root stays read-only and extraction uses the existing tmpfs. A fixed shell wrapper redirects the uploaded stdin file into the program, preserving its bytes and delivering EOF. Source/input never become shell command text.
+
+Limits are defined in `server/src/config/sandbox.js`, with environment overrides listed in `server/.env.example`: 256 MB memory with no additional swap, one CPU, 64 PIDs, 64 MB tmpfs, a 10-second deadline, and 64 KB each for source, input, and combined captured output. The root is read-only; network is disabled; capabilities are dropped; privilege escalation is disabled; all commands use UID/GID 10001. The timeout kills the entire container, and `finally` forcibly removes it. Docker logging is disabled so output cannot fill daemon log files.
+
+Results contain `{ status, stdout, stderr, exitCode, durationMs }`. Compilation and execution use separate Docker exec calls. Statuses are `success`, `compile_error`, `runtime_error`, `timeout`, or `memory_limit`. Docker OOM events identify actual memory kills, including exec children; exit code 137 alone is not assumed to mean OOM. Output overflow kills the container and returns the current phase's error status with truncated output (there is no separate output-limit status). The byte cap is shared by both streams and phases. `durationMs` measures total elapsed time, including setup, compile, execution, and cleanup; `exitCode` may be null when interrupted before Docker reports it. Invalid requests and Docker infrastructure failures throw errors rather than masquerading as user-code failures.
+
+`DOCKER_SOCKET_PATH` defaults to Docker Desktop's Linux-engine pipe on Windows and `/var/run/docker.sock` on Linux/macOS. Override it if your local Docker installation uses a different socket. Docker control requests have a separate configurable timeout, greater than the execution deadline.

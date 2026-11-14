@@ -15,6 +15,16 @@ Read this file and `docs/PROJECT_PLAN.md` before every task.
 - Follow the current official docs for each package (especially Tailwind CSS and Vite setup).
 - At the end of each task, list the package versions you installed.
 
+## Code style: keep it simple
+- Write simple, easy-to-understand code. A beginner should be able to read it.
+- Do NOT write complex or clever code. Prefer the plain, obvious way over the short, smart way.
+- Use clear, descriptive names for variables and functions (e.g. `userSnippets`, not `us`).
+- Keep functions small and focused on one job.
+- Avoid deeply nested logic, long one-liners, and unnecessary abstractions or design patterns.
+- Do not over-engineer. Build only what the task asks for.
+- Add short comments only where something is not obvious.
+- If a simple approach and a "better" complex approach both work, choose the simple one.
+
 ## Backend conventions
 - Layering: routes -> controllers -> services -> models
 - Central error handler, `AppError` class, async handler wrapper
