@@ -54,7 +54,7 @@ Network off, memory/CPU/PID limits, read-only root filesystem, all capabilities 
 
 ## Build checklist
 - [x] 1. Project scaffold and backend foundation
-- [ ] 2. Sandbox images and language config
+- [x] 2. Sandbox images and language config
 - [ ] 3. Execution engine (dockerode)
 - [ ] 4. Execute API, queue and rate limiting
 - [ ] 5. Authentication
@@ -71,3 +71,8 @@ Network off, memory/CPU/PID limits, read-only root filesystem, all capabilities 
 - Central errors use a consistent JSON envelope, retain expected AppError messages, and hide unexpected exception details. There are no public debug endpoints.
 - Manual verification: real startup against local MongoDB succeeded; GET /api/health returned 200 with connected database, unknown route returned JSON 404, and startup without MONGODB_URI exited nonzero. npm installation audit reported zero vulnerabilities.
 - Installed stable versions verified with npm view: express 5.3.0, mongoose 9.12.1, helmet 8.3.0, morgan 1.12.1, cookie-parser 1.4.7, cors 2.8.6, dotenv 18.0.10. Exact direct versions and the root lockfile are recorded in the scaffold for reproducible installs.
+- Task 2 (2026-11-15): language definitions are keyed by cpp, python, and javascript in server/src/config/languages.js. Commands are argv arrays; interpreted languages use null compileCommand. Sources live at /workspace/main.cpp, main.py, or main.mjs; C++17 compilation writes /tmp/main. Starters read one input line and support empty input/EOF with a world fallback. JavaScript uses ES modules.
+- Docker images use gcc:15, python:3.14-alpine, and node:24-alpine with no added packages, UID/GID 10001, and /workspace. Official GCC has no slim/Alpine variant, so its standard compiler image is the size exception. Local tags are compilex-sandbox-<id>:1, matching the current CompileX project name.
+- npm run build:images works from the root or server workspace. The dependency-free build script derives Dockerfile.<id> from each language entry, pulls bases, builds sequentially, and stops on failure. No MongoDB connection or environment configuration is needed for image builds.
+- README manual runs use read-only source mounts, network none, memory/CPU/PID limits, read-only root, dropped capabilities, no-new-privileges, a small executable /tmp, a 15-second wall-clock deadline, 64 KB combined output cap, and finally cleanup. Task 3 must enforce these restrictions in the execution service and track compilation/runtime status separately.
+- Task 2 verification completed (2026-11-15): the earlier disk-full failure left the cached GCC /usr/bin/dash executable at zero bytes, causing exec format error despite matching AMD64 architecture. Removed only gcc:15 and its nine identified build-cache records, then rebuilt with npm run build:images successfully. All three starters printed Hello, Ada! using PowerShell stdin under the documented sandbox restrictions. Confirmed default UID/GID 10001 and /workspace on every image, and no remaining manual containers after finally cleanup. The C++ starter strips a trailing carriage return for Windows CRLF input. JavaScript syntax checks passed. No npm packages were installed.
