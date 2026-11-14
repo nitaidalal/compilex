@@ -26,7 +26,7 @@ C++, Python, JavaScript. More later through config.
 - Light and dark orange-themed UI
 
 ## Folder structure
-runbox/
+compilex/
   AGENTS.md
   docs/PROJECT_PLAN.md
   server/

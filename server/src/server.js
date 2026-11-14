@@ -32,7 +32,7 @@ try {
     server.once('listening', resolve);
     server.once('error', reject);
   });
-  console.log(`RunBox API listening on http://localhost:${config.port}`);
+  console.log(`CompileX API listening on http://localhost:${config.port}`);
   process.on('SIGINT', () => { void shutdown('SIGINT'); });
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
 } catch (error) {
