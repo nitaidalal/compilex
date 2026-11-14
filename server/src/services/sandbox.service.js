@@ -6,7 +6,7 @@ import { Writable } from "node:stream";
 import { finished } from "node:stream/promises";
 import { sandboxConfig as limits } from "../config/sandbox.js";
 import { languages } from "../config/languages.js";
-import { AppError } from "../utils/AppError.js";
+import { validateExecution } from '../utils/validateExecution.js';
 
 const docker = new Docker({
   socketPath: limits.socketPath,
@@ -20,7 +20,7 @@ async function sourceArchive(language, code, stdin) {
     [limits.stdinFile, stdin],
   ]) {
     // Names come only from trusted config, never from the request.
-    archive.entry({ name, mode: 0o444 }, text);
+    archive.entry({ name, mode: 0o444, mtime: new Date(0) }, text);
   }
   archive.finalize();
   const chunks = [];
@@ -36,25 +36,8 @@ function outputText(chunks, maxBytes) {
 }
 
 export async function runCode(input = {}) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new AppError("Expected language, code, and optional stdin", 400);
-  }
-  const { language: id, code, stdin = "" } = input;
-  const language =
-    typeof id === "string" && Object.hasOwn(languages, id)
-      ? languages[id]
-      : null;
-  if (!language) throw new AppError("Unsupported language", 400);
-  if (typeof code !== "string" || !code.trim())
-    throw new AppError("Code is required", 400);
-  if (typeof stdin !== "string")
-    throw new AppError("stdin must be a string", 400);
-  if (
-    Buffer.byteLength(code) > limits.maxCodeBytes ||
-    Buffer.byteLength(stdin) > limits.maxStdinBytes
-  ) {
-    throw new AppError("Code or stdin exceeds the configured size limit", 413);
-  }
+  const { language: id, code, stdin } = validateExecution(input);
+  const language = languages[id];
 
   const startedAt = performance.now();
   const name = `compilex-run-${randomUUID()}`;

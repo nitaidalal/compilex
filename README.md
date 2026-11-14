@@ -117,3 +117,78 @@ Limits are defined in `server/src/config/sandbox.js`, with environment overrides
 Results contain `{ status, stdout, stderr, exitCode, durationMs }`. Compilation and execution use separate Docker exec calls. Statuses are `success`, `compile_error`, `runtime_error`, `timeout`, or `memory_limit`. Docker OOM events identify actual memory kills, including exec children; exit code 137 alone is not assumed to mean OOM. Output overflow kills the container and returns the current phase's error status with truncated output (there is no separate output-limit status). The byte cap is shared by both streams and phases. `durationMs` measures total elapsed time, including setup, compile, execution, and cleanup; `exitCode` may be null when interrupted before Docker reports it. Invalid requests and Docker infrastructure failures throw errors rather than masquerading as user-code failures.
 
 `DOCKER_SOCKET_PATH` defaults to Docker Desktop's Linux-engine pipe on Windows and `/var/run/docker.sock` on Linux/macOS. Override it if your local Docker installation uses a different socket. Docker control requests have a separate configurable timeout, greater than the execution deadline.
+
+## HTTP execution API
+
+Start MongoDB and Docker Desktop, then run `npm.cmd start` from the root or `server/`. Build the images first if needed with `npm.cmd run build:images`.
+
+`GET /api/languages` returns `{ success: true, data: [...] }`. Each entry contains only `id`, `displayName`, `starterCode`, and `monacoLanguage`. Docker image names, commands, and filesystem paths are not exposed as configuration fields.
+
+`POST /api/execute` accepts JSON `{ language, code, stdin }`; stdin defaults to an empty string. Language, types, and UTF-8 byte sizes are validated before admission to the queue. Source and stdin each default to a 65536-byte limit. The JSON body limit is calculated to accommodate both fields and JSON escaping; individual field limits still apply.
+
+Completed submissions return HTTP 200 with `{ success: true, data: { status, stdout, stderr, exitCode, durationMs } }`, including `compile_error` and `timeout` results. Invalid requests, full queues, and rate-limit rejections use `{ success: false, error: { message } }` with HTTP 400/413/415/429 as appropriate. Unexpected infrastructure errors use the same JSON shape with HTTP 500 and a generic message.
+
+Admission settings in `server/.env`:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `EXECUTION_CONCURRENCY` | `2` | Maximum active sandbox runs |
+| `EXECUTION_MAX_QUEUE_LENGTH` | `10` | Maximum waiting requests; `0` disables waiting |
+| `EXECUTION_RATE_WINDOW_MS` | `60000` | Per-IP rate-limit window |
+| `EXECUTION_RATE_MAX_REQUESTS` | `20` | Allowed execution POSTs per IP per window |
+
+The queue is first-in, first-out. An active slot is released after container cleanup, including when the sandbox throws. Disconnected waiting clients are removed from the queue; a run already started completes under its sandbox limits. Queue wait is outside the sandbox execution timer and `durationMs`. Rate limiting runs before JSON parsing and counts every execution POST reaching it, including invalid submissions and queue-full responses. Rejected requests include rate-limit headers; rate-limited responses also include `Retry-After`.
+
+The queue and rate counters are in memory in one Node process and reset on restart. This fits the local single-server setup. Requests use the direct client IP; proxy trust is left disabled. Health and language-list requests do not consume the execution rate allowance.
+
+### Curl examples (PowerShell)
+
+These commands send JSON through stdin to avoid PowerShell's native argument quoting issues. Use `curl.exe`, since Windows PowerShell can map `curl` to a different command. The examples assume the default API port 5000.
+
+```powershell
+# Supported languages
+curl.exe -sS http://localhost:5000/api/languages
+
+# Success: HTTP 200, data.status = success, stdout = Hello, Ada!
+'{"language":"python","code":"print(input())","stdin":"Hello, Ada!\n"}' | curl.exe -sS -i http://localhost:5000/api/execute -H 'Content-Type: application/json' --data-binary '@-'
+
+# Compile error: HTTP 200, data.status = compile_error, compiler message in stderr
+'{"language":"cpp","code":"int main() { broken syntax }"}' | curl.exe -sS -i http://localhost:5000/api/execute -H 'Content-Type: application/json' --data-binary '@-'
+
+# Timeout: HTTP 200, data.status = timeout (about 10 seconds by default)
+'{"language":"python","code":"while True: pass"}' | curl.exe -sS -i http://localhost:5000/api/execute -H 'Content-Type: application/json' --data-binary '@-'
+
+# Bad input: HTTP 400, Unsupported language
+'{"language":"ruby","code":"puts 123"}' | curl.exe -sS -i http://localhost:5000/api/execute -H 'Content-Type: application/json' --data-binary '@-'
+
+# Oversized stdin: HTTP 413 with the same JSON error shape
+@{ language = 'python'; code = 'print(123)'; stdin = ('x' * 65537) } | ConvertTo-Json -Compress | curl.exe -sS -i http://localhost:5000/api/execute -H 'Content-Type: application/json' --data-binary '@-'
+```
+
+### Burst showing queue-full and rate-limit responses
+
+Stop the API with Ctrl+C. In its terminal, start a fresh process with these temporary settings (the saved `.env` is unchanged):
+
+```powershell
+$env:EXECUTION_CONCURRENCY = '1'
+$env:EXECUTION_MAX_QUEUE_LENGTH = '1'
+$env:EXECUTION_RATE_WINDOW_MS = '60000'
+$env:EXECUTION_RATE_MAX_REQUESTS = '3'
+npm.cmd start
+```
+
+In another terminal, send four parallel requests as the first execution requests after restart:
+
+```powershell
+$burstFile = Join-Path ([IO.Path]::GetTempPath()) ('compilex-burst-' + [guid]::NewGuid().ToString('N') + '.json')
+[IO.File]::WriteAllText($burstFile, '{"language":"python","code":"import time; time.sleep(1); print(123)"}')
+try {
+  curl.exe --parallel --parallel-immediate --parallel-max 4 -sS -i -H 'Content-Type: application/json' --data-binary "@$burstFile" http://localhost:5000/api/execute http://localhost:5000/api/execute http://localhost:5000/api/execute http://localhost:5000/api/execute
+} finally {
+  Remove-Item -LiteralPath $burstFile
+}
+```
+
+Expect two HTTP 200 results (one active, one queued), a queue-full HTTP 429, and a per-IP rate-limit HTTP 429. Response order can vary. Queue-full says `Execution queue is full. Try again later.`; the IP limiter says `Too many execution requests from this IP. Try again later.` Do not submit other execution requests before this burst, since they consume the same IP allowance. Keep the normal sandbox timeout at 10 seconds so the one-second programs finish successfully.
+
+Afterward, stop the server and open a fresh terminal, or remove the four temporary environment overrides before starting again, to restore the defaults from `.env`.
